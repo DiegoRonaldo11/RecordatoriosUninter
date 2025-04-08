@@ -4,11 +4,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const tasksContainer = document.getElementById("tasks-container");
     const loginForm = document.getElementById("login-form");
     const registerForm = document.getElementById("register-form");
-    const showRegister = document.getElementById("show-register");
-    const showLogin = document.getElementById("show-login");
     const logoutButton = document.getElementById("logout");
     const taskForm = document.getElementById("task-form");
-    const taskList = document.getElementById("task-list");
+    const taskGroups = document.getElementById("task-groups");
+    const notificationSound = document.getElementById("notification-sound");
 
     let currentUser = localStorage.getItem("currentUser");
 
@@ -22,12 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentUser) {
         showSection(tasksContainer);
         loadTasks();
+        checkPendingTasks();
     } else {
         showSection(loginContainer);
     }
-
-    showRegister.addEventListener("click", () => showSection(registerContainer));
-    showLogin.addEventListener("click", () => showSection(loginContainer));
 
     loginForm.addEventListener("submit", (e) => {
         e.preventDefault();
@@ -41,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.setItem("currentUser", user);
             showSection(tasksContainer);
             loadTasks();
+            checkPendingTasks();
         } else {
             alert("Usuario o contraseña incorrectos");
         }
@@ -72,37 +70,36 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         const taskInput = document.getElementById("task").value;
         const taskTime = document.getElementById("task-time").value;
-        addTaskToList(taskInput, taskTime, false);
+        addTask(taskInput, taskTime, false);
         saveTask(taskInput, taskTime, false);
         taskForm.reset();
     });
 
     function loadTasks() {
-        taskList.innerHTML = "";
+        taskGroups.innerHTML = "";
         const tasks = JSON.parse(localStorage.getItem(`tasks_${currentUser}`)) || [];
-        tasks.forEach((task, index) => addTaskToList(task.text, task.time, task.completed, index));
+        const groupedTasks = groupTasksByDate(tasks);
+
+        for (const date in groupedTasks) {
+            const section = document.createElement("div");
+            section.innerHTML = `<h3>${date}</h3><ul id="list-${date}"></ul>`;
+            taskGroups.appendChild(section);
+            groupedTasks[date].forEach(task => addTask(task.text, task.time, task.completed, date));
+        }
     }
 
-    function addTaskToList(text, time, completed, index) {
+    function addTask(text, time, completed, date = formatDate(time)) {
         const taskItem = document.createElement("li");
-        taskItem.classList.toggle("completed", completed);
         taskItem.innerHTML = `
-            <span>${text} - ${new Date(time).toLocaleString()}</span>
-            <input type='checkbox' class='mark-done' ${completed ? "checked" : ""} data-index="${index}">
-            ${completed ? `<button class="delete-task" data-index="${index}">Eliminar</button>` : ""}
+            <span>${text} - ${new Date(time).toLocaleTimeString()}</span>
+            <input type='checkbox' class='mark-done' ${completed ? "checked" : ""}>
         `;
-       
-        // Agregar eventos para marcar tarea como completada
-        const checkbox = taskItem.querySelector(".mark-done");
-        checkbox.addEventListener("change", () => toggleTaskCompletion(index));
 
-        // Agregar el evento de eliminación para el botón de eliminar
-        const deleteButton = taskItem.querySelector(".delete-task");
-        if (deleteButton) {
-            deleteButton.addEventListener("click", () => deleteTask(index));
+        if (completed || new Date(time) < new Date()) {
+            taskItem.classList.add("completed");
         }
 
-        taskList.appendChild(taskItem);
+        document.getElementById(`list-${date}`).appendChild(taskItem);
     }
 
     function saveTask(text, time, completed) {
@@ -111,17 +108,44 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem(`tasks_${currentUser}`, JSON.stringify(tasks));
     }
 
-    function deleteTask(index) {
-        const tasks = JSON.parse(localStorage.getItem(`tasks_${currentUser}`)) || [];
-        tasks.splice(index, 1); // Eliminar la tarea
-        localStorage.setItem(`tasks_${currentUser}`, JSON.stringify(tasks));
-        loadTasks(); // Volver a cargar las tareas
+    function groupTasksByDate(tasks) {
+        return tasks.reduce((acc, task) => {
+            const date = formatDate(task.time);
+            acc[date] = acc[date] || [];
+            acc[date].push(task);
+            return acc;
+        }, {});
     }
 
-    function toggleTaskCompletion(index) {
-        const tasks = JSON.parse(localStorage.getItem(`tasks_${currentUser}`)) || [];
-        tasks[index].completed = !tasks[index].completed;
-        localStorage.setItem(`tasks_${currentUser}`, JSON.stringify(tasks));
-        loadTasks(); // Volver a cargar las tareas
+    function formatDate(date) {
+        return new Date(date).toLocaleDateString();
     }
-    });
+
+    function checkPendingTasks() {
+        const tasks = JSON.parse(localStorage.getItem(`tasks_${currentUser}`)) || [];
+        const now = new Date();
+
+        tasks.forEach(task => {
+            const taskTime = new Date(task.time);
+            if (taskTime > now && !task.completed) {
+                setTimeout(() => {
+                    showNotification(task.text);
+                }, taskTime - now);
+            }
+        });
+    }
+
+    function showNotification(taskText) {
+        if (Notification.permission === "granted") {
+            new Notification("Tarea pendiente", { body: taskText });
+            notificationSound.play();
+        } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    new Notification("Tarea pendiente", { body: taskText });
+                    notificationSound.play();
+                }
+            });
+        }
+    }
+});
